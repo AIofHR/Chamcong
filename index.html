@@ -307,6 +307,15 @@
             <label>Đến ngày</label>
             <input type="date" id="rangeTo">
           </div>
+          <div class="field">
+            <label>Lọc trạng thái</label>
+            <select id="statusFilter">
+              <option value="all">Tất cả</option>
+              <option value="late">Chỉ đi trễ</option>
+              <option value="pending">Chỉ chưa check-in</option>
+              <option value="ontime">Chỉ đúng giờ</option>
+            </select>
+          </div>
           <div>
             <button class="secondary" id="exportExcelBtn">Xuất Excel</button>
           </div>
@@ -834,6 +843,8 @@ document.getElementById('csvFileInput').addEventListener('change', (e)=>{
 /* ---------- ADMIN: attendance ---------- */
 const rangeFrom = document.getElementById('rangeFrom');
 const rangeTo = document.getElementById('rangeTo');
+const statusFilterEl = document.getElementById('statusFilter');
+statusFilterEl.addEventListener('change', renderRecTable);
 
 function setRange(kind){
   const now = new Date();
@@ -875,7 +886,7 @@ function renderRecTable(){
   if(from === to){
     const date = from;
     let late=0, ontime=0, pending=0;
-    const rows = employees.map(emp=>{
+    let rows = employees.map(emp=>{
       const {status, rec} = statusOf(emp.id, date);
       if(status==='late') late++; else if(status==='ontime') ontime++; else pending++;
       return {emp, status, rec};
@@ -885,8 +896,13 @@ function renderRecTable(){
     document.getElementById('statLate').textContent = late;
     document.getElementById('statPending').textContent = pending;
 
+    const filter = statusFilterEl.value;
+    if(filter !== 'all'){
+      rows = rows.filter(r => r.status === filter);
+    }
+
     if(rows.length===0){
-      tbody.innerHTML = `<tr><td colspan="8" class="empty">Chưa có nhân viên nào trong danh sách.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">Không có nhân viên nào khớp bộ lọc hiện tại.</td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(({emp,status,rec})=>{
@@ -909,7 +925,7 @@ function renderRecTable(){
       </tr>`;
     }).join('');
   } else {
-    const inRange = records.filter(r => r.date >= from && r.date <= to);
+    let inRange = records.filter(r => r.date >= from && r.date <= to);
     let late=0, ontime=0;
     inRange.forEach(r => isLate(r.time) ? late++ : ontime++);
     document.getElementById('statTotalEmp').textContent = employees.length;
@@ -917,8 +933,16 @@ function renderRecTable(){
     document.getElementById('statLate').textContent = late;
     document.getElementById('statPending').textContent = '—';
 
+    const filter = statusFilterEl.value;
+    if(filter === 'late') inRange = inRange.filter(r => isLate(r.time));
+    else if(filter === 'ontime') inRange = inRange.filter(r => !isLate(r.time));
+    else if(filter === 'pending') inRange = []; // "chưa check-in" only applies to a single day
+
     if(inRange.length===0){
-      tbody.innerHTML = `<tr><td colspan="8" class="empty">Không có bản ghi chấm công trong khoảng thời gian này.</td></tr>`;
+      const msg = filter==='pending'
+        ? 'Bộ lọc "Chưa check-in" chỉ áp dụng khi chọn đúng 1 ngày cụ thể (Từ ngày = Đến ngày).'
+        : 'Không có bản ghi chấm công nào khớp bộ lọc trong khoảng thời gian này.';
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">${msg}</td></tr>`;
       return;
     }
     inRange.sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));

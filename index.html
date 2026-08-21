@@ -268,12 +268,12 @@
 
       <div class="card">
         <h2>Nhập danh sách nhanh (import)</h2>
-        <p style="font-size:12px;color:var(--muted);margin-top:0;">Mỗi dòng theo định dạng: <span class="mono">Mã số,Họ tên,Đơn vị</span></p>
+        <p style="font-size:12px;color:var(--muted);margin-top:0;">Mỗi dòng theo định dạng: <span class="mono">Mã số,Họ tên,Đơn vị</span><br>Hoặc tải trực tiếp file CSV/Excel có các cột MSNV, Họ tên, Đơn vị/Phòng ban (sẽ tự điền vào ô bên dưới để bạn kiểm tra trước khi nhập).</p>
         <textarea id="importText" placeholder="NV001,Nguyễn Văn A,Kinh doanh&#10;NV002,Trần Thị B,Kế toán"></textarea>
         <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
           <button id="importBtn">Nhập danh sách</button>
-          <button class="secondary" id="uploadCsvBtn">Tải file CSV</button>
-          <input type="file" accept=".csv,text/csv" id="csvFileInput" style="display:none;">
+          <button class="secondary" id="uploadCsvBtn">Tải file CSV / Excel</button>
+          <input type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" id="csvFileInput" style="display:none;">
         </div>
         <div class="err" id="importErr"></div>
       </div>
@@ -760,14 +760,75 @@ document.getElementById('importBtn').addEventListener('click', async ()=>{
 document.getElementById('uploadCsvBtn').addEventListener('click', ()=>{
   document.getElementById('csvFileInput').click();
 });
+function normalizeHeader(s){
+  return s.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+}
+function rowsToCsvText(rows){
+  return rows.map(r => `${r.id},${r.name},${r.dept}`).join('\n');
+}
+function parseExcelRows(sheetRows){
+  // sheetRows: array of arrays, first row = header
+  if(!sheetRows || sheetRows.length < 2) return [];
+  const header = sheetRows[0].map(h => normalizeHeader(h||''));
+  const idCol = header.findIndex(h => h.includes('MSNV') || h.includes('MA SO') || h === 'ID');
+  const nameCol = header.findIndex(h => h.includes('HO TEN') || h.includes('TEN NHAN VIEN') || h === 'TEN');
+  const deptCol = header.findIndex(h => h.includes('PHONG BAN') || h.includes('DON VI') || h.includes('BO PHAN'));
+  if(idCol===-1 || nameCol===-1 || deptCol===-1) return null; // could not detect columns
+  const out = [];
+  for(let i=1;i<sheetRows.length;i++){
+    const row = sheetRows[i];
+    if(!row) continue;
+    const id = (row[idCol]||'').toString().trim();
+    const name = (row[nameCol]||'').toString().trim();
+    const dept = (row[deptCol]||'').toString().trim();
+    if(id && name && dept) out.push({id,name,dept});
+  }
+  return out;
+}
 document.getElementById('csvFileInput').addEventListener('change', (e)=>{
   const file = e.target.files[0];
   if(!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev)=>{
-    document.getElementById('importText').value = ev.target.result;
-  };
-  reader.readAsText(file);
+  const err = document.getElementById('importErr');
+  const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+
+  if(isExcel){
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const wb = XLSX.read(ev.target.result, {type:'array'});
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+        const parsed = parseExcelRows(rows);
+        if(parsed === null){
+          err.style.color='var(--red)';
+          err.textContent = 'Không tìm thấy đủ cột MSNV, Họ tên, Đơn vị/Phòng ban trong file. Vui lòng kiểm tra tiêu đề cột.';
+          return;
+        }
+        if(parsed.length===0){
+          err.style.color='var(--red)';
+          err.textContent = 'Không đọc được dòng dữ liệu nào hợp lệ trong file.';
+          return;
+        }
+        document.getElementById('importText').value = rowsToCsvText(parsed);
+        err.style.color='var(--green)';
+        err.textContent = `Đã đọc ${parsed.length} nhân viên từ file Excel. Kiểm tra danh sách bên trên rồi bấm "Nhập danh sách" để lưu.`;
+      }catch(ex){
+        console.error(ex);
+        err.style.color='var(--red)';
+        err.textContent = 'Không đọc được file Excel này. Vui lòng kiểm tra định dạng file.';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      document.getElementById('importText').value = ev.target.result;
+      err.style.color='var(--green)';
+      err.textContent = 'Đã tải nội dung file CSV. Kiểm tra danh sách bên trên rồi bấm "Nhập danh sách" để lưu.';
+    };
+    reader.readAsText(file);
+  }
+  e.target.value = '';
 });
 
 /* ---------- ADMIN: attendance ---------- */
